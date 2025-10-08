@@ -1,26 +1,26 @@
+import json
+import logging
+import sys
 from collections import OrderedDict
 from copy import deepcopy
 from enum import auto
 from io import StringIO
-import json
-import logging
 from pathlib import Path
-import sys
 from tempfile import TemporaryDirectory
 from typing import Literal
 from urllib.request import urlretrieve
 
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
 from configargparse import ArgumentError, ArgumentParser, Namespace
 from lightning import pytorch as pl
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger, TensorBoardLogger
 from lightning.pytorch.strategies import DDPStrategy
-import numpy as np
-import pandas as pd
 from rich.console import Console
 from rich.table import Column, Table
-import torch
-import torch.nn as nn
 
 from chemprop.cli.common import (
     add_common_args,
@@ -56,7 +56,12 @@ from chemprop.data import (
 from chemprop.data.datasets import _MolGraphDatasetMixin
 from chemprop.featurizers.atom import AtomFeatureMode
 from chemprop.models import MPNN, MolAtomBondMPNN, MulticomponentMPNN, save_model
-from chemprop.nn import AggregationRegistry, LossFunctionRegistry, MetricRegistry, PredictorRegistry
+from chemprop.nn import (
+    AggregationRegistry,
+    LossFunctionRegistry,
+    MetricRegistry,
+    PredictorRegistry,
+)
 from chemprop.nn.ffn import ConstrainerFFN
 from chemprop.nn.message_passing import (
     AtomMessagePassing,
@@ -197,12 +202,19 @@ def add_train_args(parser: ArgumentParser) -> ArgumentParser:
 
     mp_args = parser.add_argument_group("message passing")
     mp_args.add_argument(
-        "--message-hidden-dim", type=int, default=300, help="Hidden dimension of the messages"
+        "--message-hidden-dim",
+        type=int,
+        default=300,
+        help="Hidden dimension of the messages",
     )
     mp_args.add_argument(
-        "--message-bias", action="store_true", help="Add bias to the message passing layers"
+        "--message-bias",
+        action="store_true",
+        help="Add bias to the message passing layers",
     )
-    mp_args.add_argument("--depth", type=int, default=3, help="Number of message passing steps")
+    mp_args.add_argument(
+        "--depth", type=int, default=3, help="Number of message passing steps"
+    )
     mp_args.add_argument(
         "--undirected",
         action="store_true",
@@ -233,7 +245,9 @@ def add_train_args(parser: ArgumentParser) -> ArgumentParser:
         help="Normalization factor by which to divide summed up atomic features for ``norm`` aggregation",
     )
     mp_args.add_argument(
-        "--atom-messages", action="store_true", help="Pass messages on atoms rather than bonds."
+        "--atom-messages",
+        action="store_true",
+        help="Pass messages on atoms rather than bonds.",
     )
 
     mp_args.add_argument(
@@ -278,15 +292,23 @@ def add_train_args(parser: ArgumentParser) -> ArgumentParser:
 
     ffn_args = parser.add_argument_group("FFN args")
     ffn_args.add_argument(
-        "--ffn-hidden-dim", type=int, default=300, help="Hidden dimension in the FFN top model"
+        "--ffn-hidden-dim",
+        type=int,
+        default=300,
+        help="Hidden dimension in the FFN top model",
     )
     ffn_args.add_argument(
-        "--ffn-num-layers", type=int, default=1, help="Number of layers in FFN top model"
+        "--ffn-num-layers",
+        type=int,
+        default=1,
+        help="Number of layers in FFN top model",
     )
 
     extra_mpnn_args = parser.add_argument_group("extra MPNN args")
     extra_mpnn_args.add_argument(
-        "--batch-norm", action="store_true", help="Turn on batch normalization after aggregation"
+        "--batch-norm",
+        action="store_true",
+        help="Turn on batch normalization after aggregation",
     )
     extra_mpnn_args.add_argument(
         "--multiclass-num-classes",
@@ -316,7 +338,10 @@ def add_train_args(parser: ArgumentParser) -> ArgumentParser:
         help="Hidden dimension in the atom FFN top model",
     )
     atom_ffn_args.add_argument(
-        "--atom-ffn-num-layers", type=int, default=1, help="Number of layers in atom FFN top model"
+        "--atom-ffn-num-layers",
+        type=int,
+        default=1,
+        help="Number of layers in atom FFN top model",
     )
     atom_ffn_args = parser.add_argument(
         "--atom-multiclass-num-classes",
@@ -339,7 +364,10 @@ def add_train_args(parser: ArgumentParser) -> ArgumentParser:
         help="Hidden dimension in the bond FFN top model",
     )
     bond_ffn_args.add_argument(
-        "--bond-ffn-num-layers", type=int, default=1, help="Number of layers in bond FFN top model"
+        "--bond-ffn-num-layers",
+        type=int,
+        default=1,
+        help="Number of layers in bond FFN top model",
     )
     bond_ffn_args = parser.add_argument(
         "--bond-multiclass-num-classes",
@@ -448,7 +476,10 @@ def add_train_args(parser: ArgumentParser) -> ArgumentParser:
         "--eps", type=float, default=1e-8, help="Evidential regularization epsilon"
     )
     train_args.add_argument(
-        "--alpha", type=float, default=0.1, help="Target error bounds for quantile interval loss"
+        "--alpha",
+        type=float,
+        default=0.1,
+        help="Target error bounds for quantile interval loss",
     )
     # TODO: Add in v2.1
     # train_args.add_argument(  # TODO: Is threshold the same thing as the spectra target floor? I'm not sure but combined them.
@@ -489,10 +520,18 @@ def add_train_args(parser: ArgumentParser) -> ArgumentParser:
         help="Number of epochs during which learning rate increases linearly from ``init_lr`` to ``max_lr`` (afterwards, learning rate decreases exponentially from ``max_lr`` to ``final_lr``)",
     )
 
-    train_args.add_argument("--init-lr", type=float, default=1e-4, help="Initial learning rate.")
-    train_args.add_argument("--max-lr", type=float, default=1e-3, help="Maximum learning rate.")
-    train_args.add_argument("--final-lr", type=float, default=1e-4, help="Final learning rate.")
-    train_args.add_argument("--epochs", type=int, default=50, help="Number of epochs to train over")
+    train_args.add_argument(
+        "--init-lr", type=float, default=1e-4, help="Initial learning rate."
+    )
+    train_args.add_argument(
+        "--max-lr", type=float, default=1e-3, help="Maximum learning rate."
+    )
+    train_args.add_argument(
+        "--final-lr", type=float, default=1e-4, help="Final learning rate."
+    )
+    train_args.add_argument(
+        "--epochs", type=int, default=50, help="Number of epochs to train over"
+    )
     train_args.add_argument(
         "--patience",
         type=int,
@@ -508,6 +547,26 @@ def add_train_args(parser: ArgumentParser) -> ArgumentParser:
         "--class-balance",
         action="store_true",
         help="Ensures each training batch contains an equal number of positive and negative samples.",
+    )
+    train_args.add_argument(
+        "--class-weights-path",
+        type=Path,
+        help="Path to a JSON file containing class weights for each task. Format: {task_name: [weight_class_0, weight_class_1, ...], ...}. For binary classification, provide [weight_for_negative_class, weight_for_positive_class]. For multiclass, provide weights for all classes.",
+    )
+    train_args.add_argument(
+        "--pos-weight",
+        nargs="+",
+        type=float,
+        help="Positive class weights for binary classification tasks (one weight per task). Only applicable for binary classification. Mutually exclusive with --class-weights-path.",
+    )
+    train_args.add_argument(
+        "--auto-class-weights",
+        choices=["none", "inverse", "balanced"],
+        default="none",
+        help="Automatically compute class weights from training data. "
+        "'inverse': weight[c] = 1 / freq[c], "
+        "'balanced': weight[c] = n_samples / (n_classes * n_samples_class[c]). "
+        "Mutually exclusive with --class-weights-path and --pos-weight.",
     )
 
     split_args = parser.add_argument_group("split args")
@@ -532,7 +591,9 @@ def add_train_args(parser: ArgumentParser) -> ArgumentParser:
         default=0,
         help="Specify the index of the key molecule used for splitting when multiple molecules are present and constrained split_type is used (e.g., ``scaffold_balanced`` or ``random_with_repeated_smiles``). Note that this index begins with zero for the first molecule.",
     )
-    split_args.add_argument("--num-replicates", type=int, default=1, help="Number of replicates.")
+    split_args.add_argument(
+        "--num-replicates", type=int, default=1, help="Number of replicates."
+    )
     split_args.add_argument("-k", "--num-folds", help=_CV_REMOVAL_ERROR)
     split_args.add_argument(
         "--save-smiles-splits",
@@ -562,12 +623,36 @@ def add_train_args(parser: ArgumentParser) -> ArgumentParser:
 
 
 def process_train_args(args: Namespace) -> Namespace:
+    # Process class weights if provided
+    num_weight_sources = sum(
+        [
+            args.class_weights_path is not None,
+            args.pos_weight is not None,
+            args.auto_class_weights != "none",
+        ]
+    )
+    if num_weight_sources > 1:
+        raise ArgumentError(
+            argument=None,
+            message="--class-weights-path, --pos-weight, and --auto-class-weights are mutually exclusive. Please use only one.",
+        )
+
+    # Load class weights from JSON file
+    if args.class_weights_path is not None:
+        with open(args.class_weights_path, "r") as f:
+            class_weights_dict = json.load(f)
+        args.class_weights_dict = class_weights_dict
+    else:
+        args.class_weights_dict = None
+
     return args
 
 
 def validate_train_args(args):
     if args.config_path is None and args.data_path is None:
-        raise ArgumentError(argument=None, message="Data path must be provided for training.")
+        raise ArgumentError(
+            argument=None, message="Data path must be provided for training."
+        )
 
     if args.output_dir is None:
         args.output_dir = CHEMPROP_TRAIN_DIR / args.data_path.stem / NOW
@@ -577,7 +662,8 @@ def validate_train_args(args):
 
     if args.data_path.suffix not in [".csv"]:
         raise ArgumentError(
-            argument=None, message=f"Input data must be a CSV file. Got {args.data_path}"
+            argument=None,
+            message=f"Input data must be a CSV file. Got {args.data_path}",
         )
 
     if args.epochs != -1 and args.epochs <= args.warmup_epochs:
@@ -677,8 +763,36 @@ def validate_train_args(args):
 
     if args.class_balance and args.task_type != "classification":
         raise ArgumentError(
-            argument=None, message="Class balance is only applicable for classification tasks."
+            argument=None,
+            message="Class balance is only applicable for classification tasks.",
         )
+
+    # Validate class weights arguments
+    if args.class_weights_path is not None:
+        if args.task_type not in ["classification", "multiclass"]:
+            raise ArgumentError(
+                argument=None,
+                message="--class-weights-path is only applicable for classification or multiclass tasks.",
+            )
+        if not args.class_weights_path.exists():
+            raise ArgumentError(
+                argument=None,
+                message=f"Class weights file not found: {args.class_weights_path}",
+            )
+
+    if args.pos_weight is not None:
+        if args.task_type != "classification":
+            raise ArgumentError(
+                argument=None,
+                message="--pos-weight is only applicable for binary classification tasks.",
+            )
+
+    if args.auto_class_weights != "none":
+        if args.task_type not in ["classification", "multiclass"]:
+            raise ArgumentError(
+                argument=None,
+                message="--auto-class-weights is only applicable for classification or multiclass tasks.",
+            )
 
     valid_tracking_metrics = (
         args.metrics or [PredictorRegistry[args.task_type]._T_default_metric.alias]
@@ -714,6 +828,52 @@ def validate_train_args(args):
 
     args.input_columns = input_cols
     args.target_columns = target_cols
+
+    # Validate class weights against target columns
+    if args.class_weights_dict is not None:
+        # Check that all target columns have corresponding weights
+        missing_cols = set(args.target_columns) - set(args.class_weights_dict.keys())
+        if missing_cols:
+            raise ArgumentError(
+                argument=None,
+                message=f"Class weights missing for the following tasks: {missing_cols}. "
+                f"The JSON file should contain weights for all target columns: {args.target_columns}",
+            )
+
+        extra_cols = set(args.class_weights_dict.keys()) - set(args.target_columns)
+        if extra_cols:
+            logger.warning(
+                f"Class weights provided for tasks not in target columns: {extra_cols}. "
+                f"These will be ignored."
+            )
+
+        # Validate weight dimensions
+        expected_n_classes = (
+            2 if args.task_type == "classification" else args.multiclass_num_classes
+        )
+        for col in args.target_columns:
+            weights = args.class_weights_dict.get(col)
+            if weights is None:
+                continue
+            if not isinstance(weights, list):
+                raise ArgumentError(
+                    argument=None,
+                    message=f"Class weights for task '{col}' must be a list. Got: {type(weights)}",
+                )
+            if len(weights) != expected_n_classes:
+                raise ArgumentError(
+                    argument=None,
+                    message=f"Class weights for task '{col}' has {len(weights)} values, "
+                    f"but expected {expected_n_classes} for task type '{args.task_type}'",
+                )
+
+    if args.pos_weight is not None:
+        if len(args.pos_weight) != len(args.target_columns):
+            raise ArgumentError(
+                argument=None,
+                message=f"Number of pos_weight values ({len(args.pos_weight)}) must match "
+                f"number of tasks ({len(args.target_columns)})",
+            )
 
     return args
 
@@ -761,7 +921,9 @@ def normalize_inputs(train_dset, val_dset, args):
                 f"Atom features for mol {i}: loc = {np.array2string(scaler.mean_, precision=3)}, scale = {np.array2string(scaler.scale_, precision=3)}"
             )
             featurizer = (
-                train_dset.datasets[i].featurizer if multicomponent else train_dset.featurizer
+                train_dset.datasets[i].featurizer
+                if multicomponent
+                else train_dset.featurizer
             )
             V_f_transforms[i] = ScaleTransform.from_standard_scaler(
                 scaler, pad=featurizer.atom_fdim - featurizer.extra_atom_fdim
@@ -781,7 +943,9 @@ def normalize_inputs(train_dset, val_dset, args):
                 f"Bond features for mol {i}: loc = {np.array2string(scaler.mean_, precision=3)}, scale = {np.array2string(scaler.scale_, precision=3)}"
             )
             featurizer = (
-                train_dset.datasets[i].featurizer if multicomponent else train_dset.featurizer
+                train_dset.datasets[i].featurizer
+                if multicomponent
+                else train_dset.featurizer
             )
             E_f_transforms[i] = ScaleTransform.from_standard_scaler(
                 scaler, pad=featurizer.bond_fdim - featurizer.extra_bond_fdim
@@ -823,14 +987,18 @@ def normalize_inputs(train_dset, val_dset, args):
     return X_d_transform, graph_transforms, V_d_transforms, E_d_transforms
 
 
-def load_and_use_pretrained_model_scalers(model_path: Path, train_dset, val_dset) -> None:
+def load_and_use_pretrained_model_scalers(
+    model_path: Path, train_dset, val_dset
+) -> None:
     if isinstance(train_dset, MulticomponentDataset):
         _model = MulticomponentMPNN.load_from_file(model_path, map_location="cpu")
         blocks = _model.message_passing.blocks
         train_dsets = train_dset.datasets
         val_dsets = val_dset.datasets
     else:
-        mpnn_cls = MolAtomBondMPNN if isinstance(train_dset, MolAtomBondDataset) else MPNN
+        mpnn_cls = (
+            MolAtomBondMPNN if isinstance(train_dset, MolAtomBondDataset) else MPNN
+        )
         _model = mpnn_cls.load_from_file(model_path, map_location="cpu")
         blocks = [_model.message_passing]
         train_dsets = [train_dset]
@@ -845,7 +1013,8 @@ def load_and_use_pretrained_model_scalers(model_path: Path, train_dset, val_dset
         if isinstance(blocks[i].graph_transform, GraphTransform):
             if isinstance(blocks[i].graph_transform.V_transform, ScaleTransform):
                 V_anti_pad = (
-                    train_dsets[i].featurizer.atom_fdim - train_dsets[i].featurizer.extra_atom_fdim
+                    train_dsets[i].featurizer.atom_fdim
+                    - train_dsets[i].featurizer.extra_atom_fdim
                 )
                 scaler = blocks[i].graph_transform.V_transform.to_standard_scaler(
                     anti_pad=V_anti_pad
@@ -854,7 +1023,8 @@ def load_and_use_pretrained_model_scalers(model_path: Path, train_dset, val_dset
                 val_dsets[i].normalize_inputs("V_f", scaler)
             if isinstance(blocks[i].graph_transform.E_transform, ScaleTransform):
                 E_anti_pad = (
-                    train_dsets[i].featurizer.bond_fdim - train_dsets[i].featurizer.extra_bond_fdim
+                    train_dsets[i].featurizer.bond_fdim
+                    - train_dsets[i].featurizer.extra_bond_fdim
                 )
                 scaler = blocks[i].graph_transform.E_transform.to_standard_scaler(
                     anti_pad=E_anti_pad
@@ -904,7 +1074,9 @@ def save_config(parser: ArgumentParser, args: Namespace, config_path: Path):
                 ],
             )
 
-    parser.write_config_file(parsed_namespace=config_args, output_file_paths=[str(config_path)])
+    parser.write_config_file(
+        parsed_namespace=config_args, output_file_paths=[str(config_path)]
+    )
 
 
 def save_smiles_splits(args: Namespace, output_dir, train_dset, val_dset, test_dset):
@@ -937,9 +1109,19 @@ def build_splits(args, format_kwargs, featurization_kwargs):
 
     if any(
         cols is not None
-        for cols in [args.mol_target_columns, args.atom_target_columns, args.bond_target_columns]
+        for cols in [
+            args.mol_target_columns,
+            args.atom_target_columns,
+            args.bond_target_columns,
+        ]
     ):
-        for key in ["no_header_row", "rxn_cols", "ignore_cols", "splits_col", "target_cols"]:
+        for key in [
+            "no_header_row",
+            "rxn_cols",
+            "ignore_cols",
+            "splits_col",
+            "target_cols",
+        ]:
             format_kwargs.pop(key, None)
         featurization_kwargs.pop("use_cuikmolmaker_featurization", None)
         all_data = build_MAB_data_from_files(
@@ -978,20 +1160,28 @@ def build_splits(args, format_kwargs, featurization_kwargs):
 
     if args.splits_column is not None:
         df = pd.read_csv(
-            args.data_path, header=None if args.no_header_row else "infer", index_col=False
+            args.data_path,
+            header=None if args.no_header_row else "infer",
+            index_col=False,
         )
         grouped = df.groupby(df[args.splits_column].str.lower())
         train_indices = grouped.groups.get("train", pd.Index([])).tolist()
         val_indices = grouped.groups.get("val", pd.Index([])).tolist()
         test_indices = grouped.groups.get("test", pd.Index([])).tolist()
-        train_indices, val_indices, test_indices = [train_indices], [val_indices], [test_indices]
+        train_indices, val_indices, test_indices = (
+            [train_indices],
+            [val_indices],
+            [test_indices],
+        )
 
     elif args.splits_file is not None:
         with open(args.splits_file, "rb") as json_file:
             split_idxss = json.load(json_file)
         train_indices = [parse_indices(d["train"]) for d in split_idxss]
         val_indices = [parse_indices(d["val"]) for d in split_idxss]
-        test_indices = [parse_indices(d["test"]) if "test" in d else [] for d in split_idxss]
+        test_indices = [
+            parse_indices(d["test"]) if "test" in d else [] for d in split_idxss
+        ]
         args.num_replicates = len(split_idxss)
 
     else:
@@ -1005,14 +1195,22 @@ def build_splits(args, format_kwargs, featurization_kwargs):
             else:
                 splitting_mols = [datapoint.mol for datapoint in splitting_data]
         train_indices, val_indices, test_indices = make_split_indices(
-            splitting_mols, args.split, args.split_sizes, args.data_seed, args.num_replicates
+            splitting_mols,
+            args.split,
+            args.split_sizes,
+            args.data_seed,
+            args.num_replicates,
         )
 
     train_data, val_data, test_data = split_data_by_indices(
         all_data, train_indices, val_indices, test_indices
     )
     for i_split in range(len(train_data)):
-        sizes = [len(train_data[i_split][0]), len(val_data[i_split][0]), len(test_data[i_split][0])]
+        sizes = [
+            len(train_data[i_split][0]),
+            len(val_data[i_split][0]),
+            len(test_data[i_split][0]),
+        ]
         logger.info(f"train/val/test split_{i_split} sizes: {sizes}")
 
     return train_data, val_data, test_data
@@ -1046,7 +1244,9 @@ def summarize(
         frac_1_sigma = np.sum((mean_dev_abs < y_std), axis=0) / num_targets
         frac_2_sigma = np.sum((mean_dev_abs < 2 * y_std), axis=0) / num_targets
 
-        column_headers = ["Statistic"] + [f"Value ({target_cols[i]})" for i in range(y.shape[1])]
+        column_headers = ["Statistic"] + [
+            f"Value ({target_cols[i]})" for i in range(y.shape[1])
+        ]
         table_rows = [
             ["Num. smiles"] + [f"{len(y)}" for i in range(y.shape[1])],
             ["Num. targets"] + [f"{num_targets[i]}" for i in range(y.shape[1])],
@@ -1067,19 +1267,29 @@ def summarize(
         mask = np.isnan(y)
         classes = np.sort(np.unique(y[~mask]))
 
-        class_counts = np.stack([(classes[:, None] == y[:, i]).sum(1) for i in range(y.shape[1])])
+        class_counts = np.stack(
+            [(classes[:, None] == y[:, i]).sum(1) for i in range(y.shape[1])]
+        )
         class_fracs = class_counts / y.shape[0]
         nan_count = np.nansum(mask, axis=0)
         nan_frac = nan_count / y.shape[0]
 
-        column_headers = ["Class"] + [f"Count/Percent {target_cols[i]}" for i in range(y.shape[1])]
+        column_headers = ["Class"] + [
+            f"Count/Percent {target_cols[i]}" for i in range(y.shape[1])
+        ]
 
         table_rows = [
-            [f"{k}"] + [f"{class_counts[j, i]}/{class_fracs[j, i]:0.0%}" for j in range(y.shape[1])]
+            [f"{k}"]
+            + [
+                f"{class_counts[j, i]}/{class_fracs[j, i]:0.0%}"
+                for j in range(y.shape[1])
+            ]
             for i, k in enumerate(classes)
         ]
 
-        nan_row = ["NaN"] + [f"{nan_count[i]}/{nan_frac[i]:0.0%}" for i in range(y.shape[1])]
+        nan_row = ["NaN"] + [
+            f"{nan_count[i]}/{nan_frac[i]:0.0%}" for i in range(y.shape[1])
+        ]
         table_rows.append(nan_row)
 
         total_row = ["Total"] + [f"{y.shape[0]}/{100.00}%" for i in range(y.shape[1])]
@@ -1087,12 +1297,17 @@ def summarize(
 
         return (column_headers, table_rows)
     else:
-        raise ValueError(f"unsupported task type! Task type '{task_type}' was not recognized.")
+        raise ValueError(
+            f"unsupported task type! Task type '{task_type}' was not recognized."
+        )
 
 
-def build_table(column_headers: list[str], table_rows: list[str], title: str | None = None) -> str:
+def build_table(
+    column_headers: list[str], table_rows: list[str], title: str | None = None
+) -> str:
     right_justified_columns = [
-        Column(header=column_header, justify="right") for column_header in column_headers
+        Column(header=column_header, justify="right")
+        for column_header in column_headers
     ]
     table = Table(*right_justified_columns, title=title)
     for row in table_rows:
@@ -1178,7 +1393,11 @@ def build_datasets(args, train_data, val_data, test_data):
             ):
                 for kind, cols in zip(
                     ["Mol", "Atom", "Bond"],
-                    [args.mol_target_columns, args.atom_target_columns, args.bond_target_columns],
+                    [
+                        args.mol_target_columns,
+                        args.atom_target_columns,
+                        args.bond_target_columns,
+                    ],
                 ):
                     if cols is None:
                         continue
@@ -1197,12 +1416,144 @@ def build_datasets(args, train_data, val_data, test_data):
                     column_headers, table_rows = summarize(
                         args.target_columns, args.task_type, dataset
                     )
-                    output = build_table(column_headers, table_rows, f"Summary of {label} Data")
+                    output = build_table(
+                        column_headers, table_rows, f"Summary of {label} Data"
+                    )
                 else:
                     output = label + " set is empty."
                 logger.info("\n" + output)
 
     return train_dset, val_dset, test_dset
+
+
+def compute_class_weights_from_data(
+    dataset: MolGraphDataset, method: str, task_type: str, n_classes: int = 2
+):
+    """
+    Compute class weights automatically from training data.
+
+    Parameters
+    ----------
+    dataset : MolGraphDataset
+        Training dataset
+    method : str
+        Method for computing weights: 'inverse' or 'balanced'
+    task_type : str
+        Type of task: 'classification' or 'multiclass'
+    n_classes : int
+        Number of classes (for multiclass only)
+
+    Returns
+    -------
+    torch.Tensor
+        Class weights tensor of shape [n_tasks, n_classes]
+    """
+    if isinstance(dataset, MulticomponentDataset):
+        Y = dataset.datasets[0].Y
+    else:
+        Y = dataset.Y
+
+    n_tasks = Y.shape[1]
+    class_weights = []
+
+    for task_idx in range(n_tasks):
+        task_targets = Y[:, task_idx]
+        # Remove NaN values
+        task_targets = task_targets[~np.isnan(task_targets)]
+
+        if len(task_targets) == 0:
+            logger.warning(
+                f"Task {task_idx} has no valid targets. Using uniform weights."
+            )
+            class_weights.append([1.0] * n_classes)
+            continue
+
+        if task_type == "classification":
+            # Binary classification
+            n_pos = (task_targets == 1).sum()
+            n_neg = (task_targets == 0).sum()
+            n_total = len(task_targets)
+
+            if method == "inverse":
+                # weight[c] = 1 / freq[c]
+                weight_neg = n_total / n_neg if n_neg > 0 else 1.0
+                weight_pos = n_total / n_pos if n_pos > 0 else 1.0
+            elif method == "balanced":
+                # weight[c] = n_samples / (n_classes * n_samples_class[c])
+                weight_neg = n_total / (2 * n_neg) if n_neg > 0 else 1.0
+                weight_pos = n_total / (2 * n_pos) if n_pos > 0 else 1.0
+            else:
+                raise ValueError(f"Unknown method: {method}")
+
+            class_weights.append([weight_neg, weight_pos])
+        else:
+            # Multiclass classification
+            class_counts = np.bincount(task_targets.astype(int), minlength=n_classes)
+            n_total = len(task_targets)
+
+            if method == "inverse":
+                # weight[c] = 1 / freq[c]
+                weights = [
+                    n_total / count if count > 0 else 1.0 for count in class_counts
+                ]
+            elif method == "balanced":
+                # weight[c] = n_samples / (n_classes * n_samples_class[c])
+                weights = [
+                    n_total / (n_classes * count) if count > 0 else 1.0
+                    for count in class_counts
+                ]
+            else:
+                raise ValueError(f"Unknown method: {method}")
+
+            class_weights.append(weights)
+
+    return torch.tensor(class_weights, dtype=torch.float)
+
+
+def prepare_class_weights(args, target_columns, train_dset=None):
+    """
+    Prepare class weights tensor from CLI arguments.
+
+    Parameters
+    ----------
+    args : Namespace
+        Parsed command line arguments
+    target_columns : list[str]
+        List of target column names
+    train_dset : MolGraphDataset | None
+        Training dataset (required if auto_class_weights != 'none')
+
+    Returns
+    -------
+    torch.Tensor | None
+        Class weights tensor of shape [n_tasks, n_classes] or None if no class weights provided
+    """
+    if args.class_weights_dict is not None:
+        # Convert dict to tensor in the order of target_columns
+        class_weights_list = [args.class_weights_dict[col] for col in target_columns]
+        return torch.tensor(class_weights_list, dtype=torch.float)
+    elif args.pos_weight is not None:
+        # Convert pos_weight to class_weights format: [[1.0, pos_weight], ...]
+        class_weights_list = [[1.0, pw] for pw in args.pos_weight]
+        return torch.tensor(class_weights_list, dtype=torch.float)
+    elif args.auto_class_weights != "none":
+        if train_dset is None:
+            raise ValueError(
+                "train_dset must be provided when using auto_class_weights"
+            )
+        n_classes = (
+            2 if args.task_type == "classification" else args.multiclass_num_classes
+        )
+        class_weights = compute_class_weights_from_data(
+            train_dset, args.auto_class_weights, args.task_type, n_classes
+        )
+        logger.info(
+            f"Automatically computed class weights using '{args.auto_class_weights}' method: "
+            f"{class_weights.tolist()}"
+        )
+        return class_weights
+    else:
+        return None
 
 
 def build_model(
@@ -1217,7 +1568,9 @@ def build_model(
     ],
 ) -> MPNN | MulticomponentMPNN:
     X_d_transform, graph_transforms, V_d_transforms, _ = input_transforms
-    activation = parse_activation(_ACTIVATION_FUNCTIONS[args.activation], args.activation_args)
+    activation = parse_activation(
+        _ACTIVATION_FUNCTIONS[args.activation], args.activation_args
+    )
     if isinstance(train_dset, MulticomponentDataset):
         is_multi = True
         d_xd = train_dset.datasets[0].d_xd
@@ -1256,7 +1609,8 @@ def build_model(
                             f"Downloading CheMeleon Foundation model from Zenodo (https://zenodo.org/records/15460715) to {model_path}"
                         )
                         urlretrieve(
-                            r"https://zenodo.org/records/15460715/files/chemeleon_mp.pt", model_path
+                            r"https://zenodo.org/records/15460715/files/chemeleon_mp.pt",
+                            model_path,
                         )
                     else:
                         logger.info(f"Loading cached CheMeleon from {model_path}")
@@ -1275,7 +1629,9 @@ def build_model(
                             mp_blocks, train_dset.n_components, args.mpn_shared
                         )
                     else:
-                        mp_block = BondMessagePassing(**chemeleon_mp["hyper_parameters"])
+                        mp_block = BondMessagePassing(
+                            **chemeleon_mp["hyper_parameters"]
+                        )
                         mp_block.load_state_dict(chemeleon_mp["state_dict"])
                     agg = Factory.build(AggregationRegistry["mean"])
     else:
@@ -1302,7 +1658,10 @@ def build_model(
                 for i in range(train_dset.n_components)
             ]
             if args.mpn_shared:
-                if args.reaction_columns is not None and args.smiles_columns is not None:
+                if (
+                    args.reaction_columns is not None
+                    and args.smiles_columns is not None
+                ):
                     raise ArgumentError(
                         argument=None,
                         message="Cannot use shared MPNN with both molecule and reaction data.",
@@ -1325,14 +1684,31 @@ def build_model(
                 V_d_transform=V_d_transforms[0],
                 graph_transform=graph_transforms[0],
             )
-        agg = Factory.build(AggregationRegistry[args.aggregation], norm=args.aggregation_norm)
+        agg = Factory.build(
+            AggregationRegistry[args.aggregation], norm=args.aggregation_norm
+        )
 
     predictor_cls = PredictorRegistry[args.task_type]
     if args.loss_function is not None:
-        task_weights = torch.ones(n_tasks) if args.task_weights is None else args.task_weights
+        task_weights = (
+            torch.ones(n_tasks) if args.task_weights is None else args.task_weights
+        )
+
+        # Prepare class weights if provided
+        class_weights = None
+        if args.task_type in ["classification", "multiclass"]:
+            class_weights = prepare_class_weights(
+                args,
+                args.target_columns if hasattr(args, "target_columns") else [],
+                train_dset=train_dset,
+            )
+            if class_weights is not None:
+                logger.info(f"Using class weights: {class_weights.tolist()}")
+
         criterion = Factory.build(
             LossFunctionRegistry[args.loss_function],
             task_weights=task_weights,
+            class_weights=class_weights,
             v_kl=args.v_kl,
             # threshold=args.threshold, TODO: Add in v2.1
             eps=args.eps,
@@ -1425,17 +1801,39 @@ def build_MAB_model(
     ]
     if args.loss_function is not None:
         criterions = []
-        for task_weights, n_tasks in zip(
-            [args.task_weights, args.atom_task_weights, args.bond_task_weights], n_taskss
+        for task_weights, n_tasks, target_cols in zip(
+            [args.task_weights, args.atom_task_weights, args.bond_task_weights],
+            n_taskss,
+            [
+                args.mol_target_columns,
+                args.atom_target_columns,
+                args.bond_target_columns,
+            ],
         ):
             if n_tasks is None:
                 criterions.append(None)
                 continue
             task_weights = torch.ones(n_tasks) if task_weights is None else task_weights
+
+            # Prepare class weights if provided (only for mol-level targets)
+            class_weights = None
+            if target_cols == args.mol_target_columns and args.task_type in [
+                "classification",
+                "multiclass",
+            ]:
+                class_weights = prepare_class_weights(
+                    args, target_cols, train_dset=train_dset
+                )
+                if class_weights is not None:
+                    logger.info(
+                        f"Using class weights for mol targets: {class_weights.tolist()}"
+                    )
+
             criterions.append(
                 Factory.build(
                     LossFunctionRegistry[args.loss_function],
                     task_weights=task_weights,
+                    class_weights=class_weights,
                     v_kl=args.v_kl,
                     eps=args.eps,
                     alpha=args.alpha,
@@ -1504,8 +1902,12 @@ def build_MAB_model(
 
     atom_constrainer, bond_constrainer = None, None
     if args.constraints_path is not None:
-        n_atom_cons = sum([col in args.atom_target_columns for col in args.constraints_to_targets])
-        n_bond_cons = sum([col in args.bond_target_columns for col in args.constraints_to_targets])
+        n_atom_cons = sum(
+            [col in args.atom_target_columns for col in args.constraints_to_targets]
+        )
+        n_bond_cons = sum(
+            [col in args.bond_target_columns for col in args.constraints_to_targets]
+        )
 
         if n_atom_cons:
             atom_constrainer = ConstrainerFFN(
@@ -1550,7 +1952,13 @@ def build_MAB_model(
 
 
 def train_model(
-    args, train_loader, val_loader, test_loader, output_dir, output_transform, input_transforms
+    args,
+    train_loader,
+    val_loader,
+    test_loader,
+    output_dir,
+    output_transform,
+    input_transforms,
 ):
     if args.checkpoint is not None:
         model_paths = find_models(args.checkpoint)
@@ -1582,7 +1990,9 @@ def train_model(
                 mpnn_cls = MPNN
 
             model_path = model_paths[model_idx] if args.checkpoint else args.model_frzn
-            model = mpnn_cls.load_from_file(model_path, map_location=torch.device("cpu"))
+            model = mpnn_cls.load_from_file(
+                model_path, map_location=torch.device("cpu")
+            )
 
             if args.checkpoint:
                 model.apply(
@@ -1606,7 +2016,9 @@ def train_model(
                     args, train_loader.dataset, output_transform, input_transforms
                 )
             else:
-                model = build_model(args, train_loader.dataset, output_transform, input_transforms)
+                model = build_model(
+                    args, train_loader.dataset, output_transform, input_transforms
+                )
         logger.info(model)
 
         try:
@@ -1621,7 +2033,9 @@ def train_model(
 
         if isinstance(train_loader.dataset, MolAtomBondDataset):
             if args.tracking_metric == "val_loss":
-                T_tracking_metric = next(c.__class__ for c in model.criterions if c is not None)
+                T_tracking_metric = next(
+                    c.__class__ for c in model.criterions if c is not None
+                )
                 tracking_metric = args.tracking_metric
             else:
                 metric, *kind = args.tracking_metric.split("-")
@@ -1638,7 +2052,9 @@ def train_model(
                         )
                     idx, kind = next(
                         (idx, kind)
-                        for idx, (kind, cols) in enumerate(zip(["mol", "atom", "bond"], colss))
+                        for idx, (kind, cols) in enumerate(
+                            zip(["mol", "atom", "bond"], colss)
+                        )
                         if cols is not None
                     )
                 else:
@@ -1659,7 +2075,9 @@ def train_model(
                 tracking_metric = "val/" + args.tracking_metric
 
         monitor_mode = "max" if T_tracking_metric.higher_is_better else "min"
-        logger.debug(f"Evaluation metric: '{T_tracking_metric.alias}', mode: '{monitor_mode}'")
+        logger.debug(
+            f"Evaluation metric: '{T_tracking_metric.alias}', mode: '{monitor_mode}'"
+        )
 
         if args.remove_checkpoints:
             temp_dir = TemporaryDirectory()
@@ -1682,7 +2100,9 @@ def train_model(
 
         if args.epochs != -1:
             patience = args.patience if args.patience is not None else args.epochs
-            early_stopping = EarlyStopping(tracking_metric, patience=patience, mode=monitor_mode)
+            early_stopping = EarlyStopping(
+                tracking_metric, patience=patience, mode=monitor_mode
+            )
             callbacks = [checkpointing, early_stopping]
         else:
             callbacks = [checkpointing]
@@ -1734,7 +2154,11 @@ def train_model(
                     atom_preds,
                     bond_preds,
                     test_loader,
-                    next(metrics[:-1] for metrics in model.metricss if metrics is not None),
+                    next(
+                        metrics[:-1]
+                        for metrics in model.metricss
+                        if metrics is not None
+                    ),
                     model_output_dir,
                     args,
                 )
@@ -1752,7 +2176,11 @@ def train_model(
         model = model.__class__.load_from_checkpoint(best_model_path)
         p_model = model_output_dir / "best.pt"
         output_columns = (
-            [args.mol_target_columns, args.atom_target_columns, args.bond_target_columns]
+            [
+                args.mol_target_columns,
+                args.atom_target_columns,
+                args.bond_target_columns,
+            ]
             if isinstance(train_loader.dataset, MolAtomBondDataset)
             else args.target_columns
         )
@@ -1772,8 +2200,16 @@ def evaluate_and_save_predictions(preds, test_loader, metrics, model_output_dir,
     mask = torch.from_numpy(np.isfinite(targets))
     targets = np.nan_to_num(targets, nan=0.0)
     weights = torch.ones(len(test_dset))
-    lt_mask = torch.from_numpy(test_dset.lt_mask) if test_dset.lt_mask[0] is not None else None
-    gt_mask = torch.from_numpy(test_dset.gt_mask) if test_dset.gt_mask[0] is not None else None
+    lt_mask = (
+        torch.from_numpy(test_dset.lt_mask)
+        if test_dset.lt_mask[0] is not None
+        else None
+    )
+    gt_mask = (
+        torch.from_numpy(test_dset.gt_mask)
+        if test_dset.gt_mask[0] is not None
+        else None
+    )
 
     individual_scores = dict()
     for metric in metrics:
@@ -1797,14 +2233,18 @@ def evaluate_and_save_predictions(preds, test_loader, metrics, model_output_dir,
 
     logger.info("Test Set results:")
     for metric in metrics:
-        avg_loss = sum(individual_scores[metric.alias]) / len(individual_scores[metric.alias])
+        avg_loss = sum(individual_scores[metric.alias]) / len(
+            individual_scores[metric.alias]
+        )
         logger.info(f"test/{metric.alias}: {avg_loss}")
 
     if args.show_individual_scores:
         logger.info("Entire Test Set individual results:")
         for metric in metrics:
             for i, col in enumerate(args.target_columns):
-                logger.info(f"test/{col}/{metric.alias}: {individual_scores[metric.alias][i]}")
+                logger.info(
+                    f"test/{col}/{metric.alias}: {individual_scores[metric.alias][i]}"
+                )
 
     names = test_loader.dataset.names
     if isinstance(test_loader.dataset, MulticomponentDataset):
@@ -1818,7 +2258,11 @@ def evaluate_and_save_predictions(preds, test_loader, metrics, model_output_dir,
         formatted_probability_strings = format_probability_string(preds)
         predicted_class_labels = preds.argmax(axis=-1)
         df_preds = pd.DataFrame(
-            list(zip(*namess, *predicted_class_labels.T, *formatted_probability_strings.T)),
+            list(
+                zip(
+                    *namess, *predicted_class_labels.T, *formatted_probability_strings.T
+                )
+            ),
             columns=columns,
         )
     else:
@@ -1880,20 +2324,28 @@ def evaluate_and_save_MAB_predictions(
 
         logger.info("Test Set results:")
         for metric in metrics:
-            avg_loss = sum(individual_scores[metric.alias]) / len(individual_scores[metric.alias])
+            avg_loss = sum(individual_scores[metric.alias]) / len(
+                individual_scores[metric.alias]
+            )
             logger.info(f"test/{kind}/{metric.alias}: {avg_loss}")
 
         if args.show_individual_scores:
             logger.info("Entire Test Set individual results:")
             for metric in metrics:
                 for i, col in enumerate(cols):
-                    logger.info(f"test/{col}/{metric.alias}: {individual_scores[metric.alias][i]}")
+                    logger.info(
+                        f"test/{col}/{metric.alias}: {individual_scores[metric.alias][i]}"
+                    )
 
     names = test_dset.names
 
     output_columns = [
         col
-        for cols in [args.mol_target_columns, args.atom_target_columns, args.bond_target_columns]
+        for cols in [
+            args.mol_target_columns,
+            args.atom_target_columns,
+            args.bond_target_columns,
+        ]
         if cols is not None
         for col in cols
     ]
@@ -1907,7 +2359,9 @@ def evaluate_and_save_MAB_predictions(
     if "multiclass" in args.task_type:
         columns = columns + [f"{col}_prob" for col in output_columns]
         mols_class_probs = (
-            format_probability_string(mol_preds) if mol_preds is not None else [None] * len(names)
+            format_probability_string(mol_preds)
+            if mol_preds is not None
+            else [None] * len(names)
         )
         atomss_class_probs = (
             np.split(format_probability_string(atom_preds), atom_split_indices)
@@ -1938,11 +2392,27 @@ def evaluate_and_save_MAB_predictions(
             (
                 name,
                 *(mol_class_preds.tolist() if mol_class_preds is not None else []),
-                *(atoms_class_preds.T.tolist() if atoms_class_preds is not None else []),
-                *(bonds_class_preds.T.tolist() if bonds_class_preds is not None else []),
+                *(
+                    atoms_class_preds.T.tolist()
+                    if atoms_class_preds is not None
+                    else []
+                ),
+                *(
+                    bonds_class_preds.T.tolist()
+                    if bonds_class_preds is not None
+                    else []
+                ),
                 *(mol_class_probs.tolist() if mol_class_probs is not None else []),
-                *(atoms_class_probs.T.tolist() if atoms_class_probs is not None else []),
-                *(bonds_class_probs.T.tolist() if bonds_class_probs is not None else []),
+                *(
+                    atoms_class_probs.T.tolist()
+                    if atoms_class_probs is not None
+                    else []
+                ),
+                *(
+                    bonds_class_probs.T.tolist()
+                    if bonds_class_probs is not None
+                    else []
+                ),
             )
             for name, mol_class_preds, atoms_class_preds, bonds_class_preds, mol_class_probs, atoms_class_probs, bonds_class_probs in zip(
                 names,
@@ -2014,7 +2484,9 @@ def main(args):
 
         output_dir.mkdir(exist_ok=True, parents=True)
 
-        train_dset, val_dset, test_dset = build_datasets(args, train_data, val_data, test_data)
+        train_dset, val_dset, test_dset = build_datasets(
+            args, train_data, val_data, test_data
+        )
 
         if args.save_smiles_splits:
             save_smiles_splits(args, output_dir, train_dset, val_dset, test_dset)
@@ -2064,7 +2536,9 @@ def main(args):
                     logger.info(
                         f"Train data: mean = {output_scaler.mean_} | std = {output_scaler.scale_}"
                     )
-                    output_transform = UnscaleTransform.from_standard_scaler(output_scaler)
+                    output_transform = UnscaleTransform.from_standard_scaler(
+                        output_scaler
+                    )
 
         if not args.no_cache:
             if args.use_cuikmolmaker_featurization:
@@ -2087,7 +2561,9 @@ def main(args):
             logger.debug(
                 f"With `--class-balance`, effective train size = {len(train_loader.sampler)}"
             )
-        val_loader = build_dataloader(val_dset, args.batch_size, args.num_workers, shuffle=False)
+        val_loader = build_dataloader(
+            val_dset, args.batch_size, args.num_workers, shuffle=False
+        )
         if test_dset is not None:
             test_loader = build_dataloader(
                 test_dset, args.batch_size, args.num_workers, shuffle=False
