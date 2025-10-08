@@ -5,6 +5,7 @@ from typing import Sequence
 import numpy as np
 import pandas as pd
 
+from chemprop.cli.utils.utils import read_table
 from chemprop.data import MolAtomBondDatapoint
 from chemprop.featurizers.molecule import MoleculeFeaturizerRegistry
 from chemprop.utils import create_and_call_object, make_mol, parallel_execute
@@ -30,18 +31,24 @@ def build_MAB_data_from_files(
     n_workers: int = 0,
     **make_mol_kwargs,
 ):
-    df = pd.read_csv(p_data, index_col=False)
+    df = read_table(p_data, index_col=False)
 
     X_d_extra = df[descriptor_cols] if descriptor_cols else None
 
-    smis = df[smiles_cols[0]].values if smiles_cols is not None else df.iloc[:, 0].values
+    smis = (
+        df[smiles_cols[0]].values if smiles_cols is not None else df.iloc[:, 0].values
+    )
     mols = parallel_execute(
-        make_mol, [(smi,) + tuple(make_mol_kwargs.values()) for smi in smis], n_workers=n_workers
+        make_mol,
+        [(smi,) + tuple(make_mol_kwargs.values()) for smi in smis],
+        n_workers=n_workers,
     )
     n_datapoints = len(mols)
 
     weights = (
-        df[weight_col].values if weight_col is not None else np.ones(n_datapoints, dtype=np.single)
+        df[weight_col].values
+        if weight_col is not None
+        else np.ones(n_datapoints, dtype=np.single)
     )
 
     X_ds = np.load(p_descriptors)["arr_0"] if p_descriptors else [None] * n_datapoints
@@ -71,13 +78,18 @@ def build_MAB_data_from_files(
     )
     loaded_arrays = np.load(p_bond_descs[0]) if p_bond_descs else None
     E_ds = (
-        [np.repeat(loaded_arrays[f"arr_{i}"], repeats=2, axis=0) for i in range(n_datapoints)]
+        [
+            np.repeat(loaded_arrays[f"arr_{i}"], repeats=2, axis=0)
+            for i in range(n_datapoints)
+        ]
         if loaded_arrays
         else [None] * n_datapoints
     )
 
     if molecule_featurizers is not None:
-        molecule_featurizers = [MoleculeFeaturizerRegistry[mf]() for mf in molecule_featurizers]
+        molecule_featurizers = [
+            MoleculeFeaturizerRegistry[mf]() for mf in molecule_featurizers
+        ]
         mol_descriptors = np.hstack(
             [
                 np.vstack(
@@ -115,8 +127,12 @@ def build_MAB_data_from_files(
 
         if atoms_ys is not None:
             atoms_ys = atoms_ys.map(ast.literal_eval)
-            atom_lt_masks = atoms_ys.map(lambda L: ["<" in v if v else False for v in L])
-            atom_gt_masks = atoms_ys.map(lambda L: [">" in v if v else False for v in L])
+            atom_lt_masks = atoms_ys.map(
+                lambda L: ["<" in v if v else False for v in L]
+            )
+            atom_gt_masks = atoms_ys.map(
+                lambda L: [">" in v if v else False for v in L]
+            )
 
             atom_lt_masks = atom_lt_masks.apply(
                 lambda row: np.vstack(row.values).T, axis=1
@@ -126,18 +142,25 @@ def build_MAB_data_from_files(
             ).tolist()
             atoms_ys = atoms_ys.map(
                 lambda L: np.array(
-                    [v.strip("<").strip(">") if v else "nan" for v in L], dtype=np.single
+                    [v.strip("<").strip(">") if v else "nan" for v in L],
+                    dtype=np.single,
                 )
             )
-            atoms_ys = atoms_ys.apply(lambda row: np.vstack(row.values).T, axis=1).tolist()
+            atoms_ys = atoms_ys.apply(
+                lambda row: np.vstack(row.values).T, axis=1
+            ).tolist()
         else:
             atoms_ys = [None] * n_datapoints
 
         if bonds_ys is not None:
             bonds_ys = bonds_ys.map(ast.literal_eval)
             # Doesn't yet work with giving bonds_ys as a list of lists
-            bond_lt_masks = bonds_ys.map(lambda L: ["<" in v if v else False for v in L])
-            bond_gt_masks = bonds_ys.map(lambda L: [">" in v if v else False for v in L])
+            bond_lt_masks = bonds_ys.map(
+                lambda L: ["<" in v if v else False for v in L]
+            )
+            bond_gt_masks = bonds_ys.map(
+                lambda L: [">" in v if v else False for v in L]
+            )
 
             bond_lt_masks = bond_lt_masks.apply(
                 lambda row: np.vstack(row.values).T, axis=1
@@ -146,36 +169,49 @@ def build_MAB_data_from_files(
                 lambda row: np.vstack(row.values).T, axis=1
             ).tolist()
 
-            bond_lt_masks = [bond_lt_mask.astype(bool) for bond_lt_mask in bond_lt_masks]
-            bond_gt_masks = [bond_gt_mask.astype(bool) for bond_gt_mask in bond_gt_masks]
+            bond_lt_masks = [
+                bond_lt_mask.astype(bool) for bond_lt_mask in bond_lt_masks
+            ]
+            bond_gt_masks = [
+                bond_gt_mask.astype(bool) for bond_gt_mask in bond_gt_masks
+            ]
 
             bonds_ys = bonds_ys.map(
                 lambda L: np.array(
-                    [v.strip("<").strip(">") if v else "nan" for v in L], dtype=np.single
+                    [v.strip("<").strip(">") if v else "nan" for v in L],
+                    dtype=np.single,
                 )
             )
-            bonds_ys = bonds_ys.apply(lambda row: np.vstack(row.values).T, axis=1).tolist()
+            bonds_ys = bonds_ys.apply(
+                lambda row: np.vstack(row.values).T, axis=1
+            ).tolist()
 
         else:
             bonds_ys = [None] * n_datapoints
 
     else:
         mol_ys = (
-            df[mol_target_cols].values if mol_target_cols is not None else [None] * n_datapoints
+            df[mol_target_cols].values
+            if mol_target_cols is not None
+            else [None] * n_datapoints
         )
         atoms_ys = df[atom_target_cols].values if atom_target_cols is not None else None
         bonds_ys = df[bond_target_cols].values if bond_target_cols is not None else None
 
         if atoms_ys is not None:
             atoms_ys = [
-                np.array([ast.literal_eval(atom_y) for atom_y in atom_ys], dtype=float).T
+                np.array(
+                    [ast.literal_eval(atom_y) for atom_y in atom_ys], dtype=float
+                ).T
                 for atom_ys in atoms_ys
             ]
         else:
             atoms_ys = [None] * n_datapoints
         if bonds_ys is not None:
             bonds_ys = [
-                np.array([ast.literal_eval(bond_y) for bond_y in bond_ys], dtype=float).T
+                np.array(
+                    [ast.literal_eval(bond_y) for bond_y in bond_ys], dtype=float
+                ).T
                 for bond_ys in bonds_ys
             ]
             if bonds_ys[0].ndim == 3:
@@ -183,7 +219,9 @@ def build_MAB_data_from_files(
                 for mol, bonds_y in zip(mols, bonds_ys):
                     bond_vals = [0] * mol.GetNumBonds()
                     for i_bond, bond in enumerate(mol.GetBonds()):
-                        bond_vals[i_bond] = bonds_y[bond.GetBeginAtomIdx(), bond.GetEndAtomIdx(), :]
+                        bond_vals[i_bond] = bonds_y[
+                            bond.GetBeginAtomIdx(), bond.GetEndAtomIdx(), :
+                        ]
                     bonds_ys_1D.append(np.array(bond_vals, dtype=float))
                 bonds_ys = bonds_ys_1D
 
@@ -194,7 +232,7 @@ def build_MAB_data_from_files(
     bond_constraints = [None] * n_datapoints
 
     if p_constraints:
-        df_constraints = pd.read_csv(p_constraints, index_col=False)
+        df_constraints = read_table(p_constraints, index_col=False)
         n_mols = len(df_constraints)
 
         if constraints_cols_to_target_cols is None:

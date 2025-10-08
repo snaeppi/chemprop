@@ -40,6 +40,7 @@ from chemprop.cli.utils import (
     make_dataset,
     parse_activation,
     parse_indices,
+    write_table,
 )
 from chemprop.cli.utils.args import uppercase
 from chemprop.data import (
@@ -1091,16 +1092,16 @@ def save_smiles_splits(args: Namespace, output_dir, train_dset, val_dset, test_d
 
     train_smis = train_dset.names
     df_train = pd.DataFrame(train_smis, columns=column_labels)
-    df_train.to_csv(output_dir / "train_smiles.csv", index=False)
+    write_table(df_train, output_dir / "train_smiles.csv", index=False)
 
     val_smis = val_dset.names
     df_val = pd.DataFrame(val_smis, columns=column_labels)
-    df_val.to_csv(output_dir / "val_smiles.csv", index=False)
+    write_table(df_val, output_dir / "val_smiles.csv", index=False)
 
     if test_dset is not None:
         test_smis = test_dset.names
         df_test = pd.DataFrame(test_smis, columns=column_labels)
-        df_test.to_csv(output_dir / "test_smiles.csv", index=False)
+        write_table(df_test, output_dir / "test_smiles.csv", index=False)
 
 
 def build_splits(args, format_kwargs, featurization_kwargs):
@@ -2268,7 +2269,7 @@ def evaluate_and_save_predictions(preds, test_loader, metrics, model_output_dir,
     else:
         df_preds = pd.DataFrame(list(zip(*namess, *preds.T)), columns=columns)
 
-    df_preds.to_csv(model_output_dir / "test_predictions.csv", index=False)
+    write_table(df_preds, model_output_dir / "test_predictions.csv", index=False)
 
 
 def evaluate_and_save_MAB_predictions(
@@ -2451,7 +2452,7 @@ def evaluate_and_save_MAB_predictions(
         ]
         df_preds = pd.DataFrame(outputs, columns=columns)
 
-    df_preds.to_csv(model_output_dir / "test_predictions.csv", index=False)
+    write_table(df_preds, model_output_dir / "test_predictions.csv", index=False)
 
 
 def main(args):
