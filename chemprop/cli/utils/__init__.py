@@ -10,7 +10,16 @@ from .parsing import (
     parse_activation,
     parse_indices,
 )
-from .utils import _pop_attr, _pop_attr_d, format_probability_string, pop_attr
+from .utils import (
+    TABLE_READ_FORMATS,
+    TABLE_WRITE_FORMATS,
+    _pop_attr,
+    _pop_attr_d,
+    format_probability_string,
+    pop_attr,
+    read_table,
+    write_table,
+)
 
 __all__ = [
     "activation_function_argument",
@@ -28,9 +37,13 @@ __all__ = [
     "args",
     "command",
     "format_probability_string",
+    "TABLE_READ_FORMATS",
+    "TABLE_WRITE_FORMATS",
     "parsing",
     "utils",
     "pop_attr",
     "_pop_attr",
     "_pop_attr_d",
+    "read_table",
+    "write_table",
 ]

@@ -15,6 +15,7 @@ from chemprop.cli.utils import (
     build_data_from_files,
     build_MAB_data_from_files,
     make_dataset,
+    TABLE_READ_FORMATS,
 )
 from chemprop.models import load_model
 from chemprop.nn.metrics import BoundedMixin
@@ -34,7 +35,7 @@ class FingerprintSubcommand(Subcommand):
             "--test-path",
             required=True,
             type=Path,
-            help="Path to an input CSV file containing SMILES",
+            help="Path to an input CSV, Parquet, or Feather file containing SMILES",
         )
         parser.add_argument(
             "-o",
@@ -70,9 +71,13 @@ class FingerprintSubcommand(Subcommand):
 
 
 def process_fingerprint_args(args: Namespace) -> Namespace:
-    if args.test_path.suffix not in [".csv"]:
+    if args.test_path.suffix.lower() not in TABLE_READ_FORMATS:
         raise ArgumentError(
-            argument=None, message=f"Input data must be a CSV file. Got {args.test_path}"
+            argument=None,
+            message=(
+                f"Input data must be one of {', '.join(TABLE_READ_FORMATS)}. "
+                f"Got {args.test_path}"
+            ),
         )
     if args.output is None:
         args.output = args.test_path.parent / (args.test_path.stem + "_fps.csv")
