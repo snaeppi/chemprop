@@ -49,6 +49,7 @@ __all__ = [
     "SID",
     "Wasserstein",
     "QuantileLoss",
+    "BetaBinomialLoss",
 ]
 
 
@@ -255,6 +256,63 @@ class EvidentialLoss(ChempropMetric):
     def extra_repr(self) -> str:
         parent_repr = super().extra_repr()
         return parent_repr + f", v_kl={self.v_kl}, eps={self.eps}"
+
+
+@LossFunctionRegistry.register("beta-binomial")
+class BetaBinomialLoss(ChempropMetric):
+    """Negative log-likelihood loss for the Beta-Binomial distribution.
+
+    Expects predictions of the Beta prior parameters :math:`\\alpha, \\beta` for each task.
+    The ``targets`` are treated as observed *rates* :math:`k/n \\in [0,1]` and the per-sample
+    ``weights`` are interpreted as the number of trials :math:`n`. To avoid double-counting, the
+    internal loss is normalized by :math:`n` so that the external sample weighting in
+    :class:`ChempropMetric` still returns the mean NLL.
+    """
+
+    def __init__(self, task_weights: ArrayLike = 1.0, eps: float = 1e-8):
+        super().__init__(task_weights)
+        self.eps = eps
+
+    def _calc_unreduced_loss(
+        self,
+        preds: Tensor,
+        targets: Tensor,
+        mask: Tensor,
+        weights: Tensor,
+        *args,
+    ) -> Tensor:
+        # preds: (b x t x 2) with (alpha, beta)
+        alpha, beta = torch.unbind(preds, dim=-1)
+
+        # Number of trials per sample; broadcast to tasks if needed.
+        n = weights if weights.shape == targets.shape else weights.view(-1, 1)
+        n_safe = torch.where(n > 0, n, torch.ones_like(n))
+
+        # Reconstruct integer-ish counts k from hit-rate targets and trial counts n.
+        k = torch.round(targets * n_safe)
+        k = torch.clamp(k, min=0.0)
+        k = torch.minimum(k, n_safe)
+
+        log_coeff = torch.lgamma(n_safe + 1) - torch.lgamma(k + 1) - torch.lgamma(n_safe - k + 1)
+
+        loglik = (
+            torch.lgamma(k + alpha)
+            + torch.lgamma(n_safe - k + beta)
+            - torch.lgamma(n_safe + alpha + beta)
+            - torch.lgamma(alpha)
+            - torch.lgamma(beta)
+            + torch.lgamma(alpha + beta)
+        )
+
+        nll = -(log_coeff + loglik)
+
+        # Normalize by n so that external weighting by `weights` in ChempropMetric.update
+        # yields the mean NLL per sample.
+        return nll / n_safe
+
+    def extra_repr(self) -> str:
+        parent_repr = super().extra_repr()
+        return parent_repr + f", eps={self.eps}"
 
 
 @LossFunctionRegistry.register("bce")

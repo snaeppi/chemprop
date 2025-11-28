@@ -18,6 +18,7 @@ from chemprop.nn.metrics import (
     DirichletLoss,
     EvidentialLoss,
     MulticlassMCCMetric,
+    BetaBinomialLoss,
     MVELoss,
     QuantileLoss,
 )
@@ -30,6 +31,7 @@ __all__ = [
     "RegressionFFN",
     "MveFFN",
     "EvidentialFFN",
+    "BetaBinomialFFN",
     "BinaryClassificationFFNBase",
     "BinaryClassificationFFN",
     "BinaryDirichletFFN",
@@ -225,6 +227,47 @@ class QuantileFFN(RegressionFFN):
         return torch.stack((mean, interval), dim=2)
 
     train_step = forward
+
+
+@PredictorRegistry.register("beta-binomial")
+class BetaBinomialFFN(RegressionFFN):
+    """Feed-forward network for Beta-Binomial regression.
+
+    The underlying FFN outputs two unconstrained values per task which are transformed to
+    positive :math:`\\alpha, \\beta` parameters of a Beta prior. During training, the
+    :class:`BetaBinomialLoss` operates on these :math:`\\alpha, \\beta` parameters. During
+    inference, the predictor returns the mean success probability together with the
+    concentration (:math:`\\alpha + \\beta`).
+    """
+
+    n_targets = 2
+    _T_default_criterion = BetaBinomialLoss
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.eps = 1e-8
+
+    def forward(self, Z: Tensor) -> Tensor:
+        Y = self.ffn(Z)
+        alpha_raw, beta_raw = torch.chunk(Y, self.n_targets, 1)
+
+        alpha = F.softplus(alpha_raw) + self.eps
+        beta = F.softplus(beta_raw) + self.eps
+
+        p = alpha / (alpha + beta)
+
+        concentration = alpha + beta
+
+        return torch.stack((p, concentration), dim=2)
+
+    def train_step(self, Z: Tensor) -> Tensor:
+        Y = self.ffn(Z)
+        alpha_raw, beta_raw = torch.chunk(Y, self.n_targets, 1)
+
+        alpha = F.softplus(alpha_raw) + self.eps
+        beta = F.softplus(beta_raw) + self.eps
+
+        return torch.stack((alpha, beta), dim=2)
 
 
 class BinaryClassificationFFNBase(_FFNPredictorBase):
