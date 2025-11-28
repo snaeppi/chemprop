@@ -4,6 +4,7 @@ from enum import auto
 from io import StringIO
 import json
 import logging
+import re
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
@@ -75,6 +76,69 @@ logger = logging.getLogger(__name__)
 _CV_REMOVAL_ERROR = (
     "The -k/--num-folds argument was removed in v2.1.0 - use --num-replicates instead."
 )
+
+
+def _load_task_weights_from_path(weights_path: Path, label: str) -> list[float]:
+    weights_path = weights_path.expanduser()
+    try:
+        raw_text = weights_path.read_text()
+    except FileNotFoundError as e:
+        raise ArgumentError(
+            argument=None, message=f"{label} file not found: {weights_path}"
+        ) from e
+    except OSError as e:
+        raise ArgumentError(
+            argument=None, message=f"Could not read {label} file {weights_path}: {e}"
+        ) from e
+
+    try:
+        parsed = json.loads(raw_text)
+    except json.JSONDecodeError:
+        parsed = None
+
+    if parsed is not None:
+        if isinstance(parsed, dict):
+            parsed = list(parsed.values())
+        if not isinstance(parsed, list):
+            raise ArgumentError(
+                argument=None,
+                message=f"{label} file must contain a JSON array or newline/comma separated numbers. Got {type(parsed).__name__}.",
+            )
+        weights = parsed
+    else:
+        tokens = [tok for tok in re.split(r"[\s,]+", raw_text.strip()) if tok]
+        if not tokens:
+            raise ArgumentError(
+                argument=None, message=f"{label} file {weights_path} is empty or malformed."
+            )
+        try:
+            weights = [float(tok) for tok in tokens]
+        except ValueError as e:
+            raise ArgumentError(
+                argument=None,
+                message=f"Could not parse {label} from {weights_path}: {e}",
+            ) from e
+
+    try:
+        return [float(weight) for weight in weights]
+    except (TypeError, ValueError) as e:
+        raise ArgumentError(
+            argument=None,
+            message=f"{label} must be a sequence of numbers. Parsed values: {parsed}",
+        ) from e
+
+
+def _resolve_task_weights(
+    weights: list[float] | None, weights_path: Path | None, arg_label: str
+) -> list[float] | None:
+    if weights is not None and weights_path is not None:
+        raise ArgumentError(
+            argument=None, message=f"Specify either {arg_label} or {arg_label}-path, not both."
+        )
+    if weights_path is not None:
+        return _load_task_weights_from_path(weights_path, arg_label)
+    return weights
+
 
 _ACTIVATION_FUNCTIONS = OrderedDict(
     {
@@ -310,6 +374,11 @@ def add_train_args(parser: ArgumentParser) -> ArgumentParser:
         help="Weights to apply for all atom tasks in the loss function",
     )
     atom_ffn_args.add_argument(
+        "--atom-task-weights-path",
+        type=Path,
+        help="Path to file containing weights to apply for all atom tasks in the loss function (expects a JSON array or comma/whitespace separated numbers)",
+    )
+    atom_ffn_args.add_argument(
         "--atom-ffn-hidden-dim",
         type=int,
         default=300,
@@ -331,6 +400,11 @@ def add_train_args(parser: ArgumentParser) -> ArgumentParser:
         nargs="+",
         type=float,
         help="Weights to apply for all bond tasks in the loss function",
+    )
+    bond_ffn_args.add_argument(
+        "--bond-task-weights-path",
+        type=Path,
+        help="Path to file containing weights to apply for all bond tasks in the loss function (expects a JSON array or comma/whitespace separated numbers)",
     )
     bond_ffn_args.add_argument(
         "--bond-ffn-hidden-dim",
@@ -483,6 +557,11 @@ def add_train_args(parser: ArgumentParser) -> ArgumentParser:
         help="Weights to apply for whole tasks in the loss function",
     )
     train_args.add_argument(
+        "--task-weights-path",
+        type=Path,
+        help="Path to file containing weights to apply for whole tasks in the loss function (expects a JSON array or comma/whitespace separated numbers)",
+    )
+    train_args.add_argument(
         "--warmup-epochs",
         type=int,
         default=2,
@@ -562,6 +641,15 @@ def add_train_args(parser: ArgumentParser) -> ArgumentParser:
 
 
 def process_train_args(args: Namespace) -> Namespace:
+    args.task_weights = _resolve_task_weights(
+        args.task_weights, args.task_weights_path, "--task-weights"
+    )
+    args.atom_task_weights = _resolve_task_weights(
+        args.atom_task_weights, args.atom_task_weights_path, "--atom-task-weights"
+    )
+    args.bond_task_weights = _resolve_task_weights(
+        args.bond_task_weights, args.bond_task_weights_path, "--bond-task-weights"
+    )
     return args
 
 
