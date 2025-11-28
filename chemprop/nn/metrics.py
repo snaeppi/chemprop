@@ -1,10 +1,10 @@
 from abc import abstractmethod
 
-from numpy.typing import ArrayLike
 import torch
+import torchmetrics
+from numpy.typing import ArrayLike
 from torch import Tensor
 from torch.nn import functional as F
-import torchmetrics
 from torchmetrics.utilities.compute import auc
 from torchmetrics.utilities.data import dim_zero_cat
 
@@ -106,8 +106,12 @@ class ChempropMetric(torchmetrics.Metric):
             if weights is None
             else weights
         )
-        lt_mask = torch.zeros_like(targets, dtype=torch.bool) if lt_mask is None else lt_mask
-        gt_mask = torch.zeros_like(targets, dtype=torch.bool) if gt_mask is None else gt_mask
+        lt_mask = (
+            torch.zeros_like(targets, dtype=torch.bool) if lt_mask is None else lt_mask
+        )
+        gt_mask = (
+            torch.zeros_like(targets, dtype=torch.bool) if gt_mask is None else gt_mask
+        )
 
         L = self._calc_unreduced_loss(preds, targets, mask, weights, lt_mask, gt_mask)
         L = L * weights.view(-1, 1) * self.task_weights * mask
@@ -119,7 +123,9 @@ class ChempropMetric(torchmetrics.Metric):
         return self.total_loss / self.num_samples
 
     @abstractmethod
-    def _calc_unreduced_loss(self, preds, targets, mask, weights, lt_mask, gt_mask) -> Tensor:
+    def _calc_unreduced_loss(
+        self, preds, targets, mask, weights, lt_mask, gt_mask
+    ) -> Tensor:
         """Calculate a tensor of shape `b x t` containing the unreduced loss values."""
 
     def extra_repr(self) -> str:
@@ -152,7 +158,9 @@ class RMSE(MSE):
 
 
 class BoundedMixin:
-    def _calc_unreduced_loss(self, preds, targets, mask, weights, lt_mask, gt_mask) -> Tensor:
+    def _calc_unreduced_loss(
+        self, preds, targets, mask, weights, lt_mask, gt_mask
+    ) -> Tensor:
         preds = torch.where((preds < targets) & lt_mask, targets, preds)
         preds = torch.where((preds > targets) & gt_mask, targets, preds)
 
@@ -229,7 +237,9 @@ class EvidentialLoss(ChempropMetric):
         Cent. Sci. 2021, 7, 8, 1356-1367. https://doi.org/10.1021/acscentsci.1c00546
     """
 
-    def __init__(self, task_weights: ArrayLike = 1.0, v_kl: float = 0.2, eps: float = 1e-8):
+    def __init__(
+        self, task_weights: ArrayLike = 1.0, v_kl: float = 0.2, eps: float = 1e-8
+    ):
         super().__init__(task_weights)
         self.v_kl = v_kl
         self.eps = eps
@@ -259,17 +269,95 @@ class EvidentialLoss(ChempropMetric):
 
 @LossFunctionRegistry.register("bce")
 class BCELoss(ChempropMetric):
+    def __init__(
+        self, task_weights: ArrayLike = 1.0, class_weights: Tensor | None = None
+    ):
+        """
+        Parameters
+        ----------
+        task_weights : ArrayLike, default=1.0
+            the per-task weights of shape `t` or `1 x t`. Defaults to all tasks having a weight of 1.
+        class_weights : Tensor | None, default=None
+            the per-task, per-class weights of shape `t x 2` for binary classification.
+            For each task, weights are [weight_for_class_0, weight_for_class_1].
+            If None, all classes have equal weight.
+        """
+        super().__init__(task_weights)
+        if class_weights is not None:
+            class_weights = torch.as_tensor(class_weights, dtype=torch.float)
+            if class_weights.dim() == 1:
+                # Single task case: expand to [1, 2]
+                class_weights = class_weights.view(1, -1)
+            # Compute pos_weight for BCEWithLogitsLoss: ratio of class_1_weight / class_0_weight
+            pos_weight = class_weights[:, 1] / class_weights[:, 0]
+            self.register_buffer("pos_weight", pos_weight.view(1, -1))
+        else:
+            self.register_buffer("pos_weight", None)
+
     def _calc_unreduced_loss(self, preds: Tensor, targets: Tensor, *args) -> Tensor:
-        return F.binary_cross_entropy_with_logits(preds, targets, reduction="none")
+        return F.binary_cross_entropy_with_logits(
+            preds, targets, reduction="none", pos_weight=self.pos_weight
+        )
+
+    def extra_repr(self) -> str:
+        parent_repr = super().extra_repr()
+        if self.pos_weight is not None:
+            return parent_repr + f", pos_weight={self.pos_weight.squeeze().tolist()}"
+        return parent_repr
 
 
 @LossFunctionRegistry.register("ce")
 class CrossEntropyLoss(ChempropMetric):
+    def __init__(
+        self, task_weights: ArrayLike = 1.0, class_weights: Tensor | None = None
+    ):
+        """
+        Parameters
+        ----------
+        task_weights : ArrayLike, default=1.0
+            the per-task weights of shape `t` or `1 x t`. Defaults to all tasks having a weight of 1.
+        class_weights : Tensor | None, default=None
+            the per-task, per-class weights of shape `t x c` for multiclass classification,
+            where c is the number of classes. If None, all classes have equal weight.
+        """
+        super().__init__(task_weights)
+        if class_weights is not None:
+            class_weights = torch.as_tensor(class_weights, dtype=torch.float)
+            if class_weights.dim() == 1:
+                # Single task case: expand to [1, c]
+                class_weights = class_weights.view(1, -1)
+            self.register_buffer("class_weights", class_weights)
+        else:
+            self.register_buffer("class_weights", None)
+
     def _calc_unreduced_loss(self, preds: Tensor, targets: Tensor, *args) -> Tensor:
-        preds = preds.transpose(1, 2)
+        # preds: [batch, n_tasks, n_classes]
+        # targets: [batch, n_tasks]
+        preds = preds.transpose(1, 2)  # [batch, n_classes, n_tasks]
         targets = targets.long()
 
-        return F.cross_entropy(preds, targets, reduction="none")
+        if self.class_weights is not None:
+            # Apply per-task class weights
+            # CrossEntropyLoss expects weight as [n_classes] for each call
+            # We need to loop over tasks to apply different weights per task
+            batch_size, n_classes, n_tasks = preds.shape
+            loss = torch.zeros(batch_size, n_tasks, device=preds.device)
+            for task_idx in range(n_tasks):
+                loss[:, task_idx] = F.cross_entropy(
+                    preds[:, :, task_idx],  # [batch, n_classes]
+                    targets[:, task_idx],  # [batch]
+                    weight=self.class_weights[task_idx],  # [n_classes]
+                    reduction="none",
+                )
+            return loss
+        else:
+            return F.cross_entropy(preds, targets, reduction="none")
+
+    def extra_repr(self) -> str:
+        parent_repr = super().extra_repr()
+        if self.class_weights is not None:
+            return parent_repr + f", class_weights={self.class_weights.tolist()}"
+        return parent_repr
 
 
 @LossFunctionRegistry.register("binary-mcc")
@@ -306,7 +394,9 @@ class BinaryMCCLoss(ChempropMetric):
         if not (0 <= preds.min() and preds.max() <= 1):  # assume logits
             preds = preds.sigmoid()
 
-        TP, FP, TN, FN = self._calc_unreduced_loss(preds, targets.long(), mask, weights, *args)
+        TP, FP, TN, FN = self._calc_unreduced_loss(
+            preds, targets.long(), mask, weights, *args
+        )
 
         self.TP += [TP]
         self.FP += [FP]
@@ -327,7 +417,9 @@ class BinaryMCCLoss(ChempropMetric):
         TN = dim_zero_cat(self.TN).sum(0)
         FN = dim_zero_cat(self.FN).sum(0)
 
-        MCC = (TP * TN - FP * FN) / ((TP + FP) * (TP + FN) * (TN + FP) * (TN + FN) + 1e-8).sqrt()
+        MCC = (TP * TN - FP * FN) / (
+            (TP + FP) * (TP + FN) * (TN + FP) * (TN + FN) + 1e-8
+        ).sqrt()
         MCC = MCC * self.task_weights
         return 1 - MCC.mean()
 
@@ -382,7 +474,9 @@ class MulticlassMCCLoss(ChempropMetric):
         if not (0 <= preds.min() and preds.max() <= 1):  # assume logits
             preds = preds.softmax(2)
 
-        p, t, c, s = self._calc_unreduced_loss(preds, targets.long(), mask, weights, *args)
+        p, t, c, s = self._calc_unreduced_loss(
+            preds, targets.long(), mask, weights, *args
+        )
 
         self.p += [p]
         self.t += [t]
@@ -452,7 +546,9 @@ class BinaryAUROC(ClassificationMixin, torchmetrics.classification.BinaryAUROC):
 
 
 @MetricRegistry.register("prc")
-class BinaryAUPRC(ClassificationMixin, torchmetrics.classification.BinaryPrecisionRecallCurve):
+class BinaryAUPRC(
+    ClassificationMixin, torchmetrics.classification.BinaryPrecisionRecallCurve
+):
     def compute(self) -> Tensor:
         p, r, _ = super().compute()
         return auc(r, p)
@@ -505,7 +601,11 @@ class DirichletLoss(ChempropMetric):
         dg0 = torch.digamma(alpha)
         dg1 = torch.digamma(S_alpha)
 
-        L_kl = ln_alpha + ln_beta + torch.sum((alpha - beta) * (dg0 - dg1), -1, keepdim=True)
+        L_kl = (
+            ln_alpha
+            + ln_beta
+            + torch.sum((alpha - beta) * (dg0 - dg1), -1, keepdim=True)
+        )
 
         return (L_mse + self.v_kl * L_kl).mean(-1)
 
@@ -515,12 +615,16 @@ class DirichletLoss(ChempropMetric):
 
 @LossFunctionRegistry.register("sid")
 class SID(ChempropMetric):
-    def __init__(self, task_weights: ArrayLike = 1.0, threshold: float | None = None, **kwargs):
+    def __init__(
+        self, task_weights: ArrayLike = 1.0, threshold: float | None = None, **kwargs
+    ):
         super().__init__(task_weights, **kwargs)
 
         self.threshold = threshold
 
-    def _calc_unreduced_loss(self, preds: Tensor, targets: Tensor, mask: Tensor, *args) -> Tensor:
+    def _calc_unreduced_loss(
+        self, preds: Tensor, targets: Tensor, mask: Tensor, *args
+    ) -> Tensor:
         if self.threshold is not None:
             preds = preds.clamp(min=self.threshold)
 
@@ -529,7 +633,9 @@ class SID(ChempropMetric):
         targets = targets.masked_fill(~mask, 1)
         preds_norm = preds_norm.masked_fill(~mask, 1)
 
-        return (preds_norm / targets).log() * preds_norm + (targets / preds_norm).log() * targets
+        return (preds_norm / targets).log() * preds_norm + (
+            targets / preds_norm
+        ).log() * targets
 
     def extra_repr(self) -> str:
         return f"threshold={self.threshold}"
@@ -542,7 +648,9 @@ class Wasserstein(ChempropMetric):
 
         self.threshold = threshold
 
-    def _calc_unreduced_loss(self, preds: Tensor, targets: Tensor, mask: Tensor, *args) -> Tensor:
+    def _calc_unreduced_loss(
+        self, preds: Tensor, targets: Tensor, mask: Tensor, *args
+    ) -> Tensor:
         if self.threshold is not None:
             preds = preds.clamp(min=self.threshold)
 
@@ -561,14 +669,16 @@ class QuantileLoss(ChempropMetric):
         self.alpha = alpha
 
         bounds = torch.tensor([-1 / 2, 1 / 2]).view(-1, 1, 1)
-        tau = torch.tensor([[alpha / 2, 1 - alpha / 2], [alpha / 2 - 1, -alpha / 2]]).view(
-            2, 2, 1, 1
-        )
+        tau = torch.tensor(
+            [[alpha / 2, 1 - alpha / 2], [alpha / 2 - 1, -alpha / 2]]
+        ).view(2, 2, 1, 1)
 
         self.register_buffer("bounds", bounds)
         self.register_buffer("tau", tau)
 
-    def _calc_unreduced_loss(self, preds: Tensor, targets: Tensor, mask: Tensor, *args) -> Tensor:
+    def _calc_unreduced_loss(
+        self, preds: Tensor, targets: Tensor, mask: Tensor, *args
+    ) -> Tensor:
         mean, interval = torch.unbind(preds, dim=-1)
 
         interval_bounds = self.bounds * interval

@@ -115,6 +115,7 @@ class _FFNPredictorBase(Predictor, HyperparametersMixin):
         activation: str | nn.Module = "relu",
         criterion: ChempropMetric | None = None,
         task_weights: Tensor | None = None,
+        class_weights: Tensor | None = None,
         threshold: float | None = None,
         output_transform: UnscaleTransform | None = None,
     ):
@@ -133,7 +134,10 @@ class _FFNPredictorBase(Predictor, HyperparametersMixin):
         )
         task_weights = torch.ones(n_tasks) if task_weights is None else task_weights
         self.criterion = criterion or Factory.build(
-            self._T_default_criterion, task_weights=task_weights, threshold=threshold
+            self._T_default_criterion,
+            task_weights=task_weights,
+            threshold=threshold,
+            **({"class_weights": class_weights} if class_weights is not None else {}),
         )
         self.output_transform = output_transform if output_transform is not None else nn.Identity()
 
@@ -285,6 +289,7 @@ class MulticlassClassificationFFN(_FFNPredictorBase):
         activation: str | nn.Module = "relu",
         criterion: ChempropMetric | None = None,
         task_weights: Tensor | None = None,
+        class_weights: Tensor | None = None,
         threshold: float | None = None,
         output_transform: UnscaleTransform | None = None,
     ):
@@ -298,6 +303,7 @@ class MulticlassClassificationFFN(_FFNPredictorBase):
             activation,
             criterion,
             task_weights,
+            class_weights,
             threshold,
             output_transform,
         )
