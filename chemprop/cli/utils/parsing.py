@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from torch import nn
 
+from chemprop.cli.utils.utils import read_table
 from chemprop.data.datapoints import (
     LazyMoleculeDatapoint,
     MolAtomBondDatapoint,
@@ -44,7 +45,7 @@ def parse_csv(
     bounded: bool = False,
     no_header_row: bool = False,
 ):
-    df = pd.read_csv(path, header=None if no_header_row else "infer", index_col=False)
+    df = read_table(path, header=None if no_header_row else "infer", index_col=False)
 
     if smiles_cols is not None and rxn_cols is not None:
         smiss = df[smiles_cols].T.values.tolist()
@@ -72,7 +73,11 @@ def parse_csv(
             for column in df.columns
             if column
             not in set(  # if splits or weight is None, df.columns will never have None
-                input_cols + (ignore_cols or []) + descriptor_cols + [splits_col] + [weight_col]
+                input_cols
+                + (ignore_cols or [])
+                + descriptor_cols
+                + [splits_col]
+                + [weight_col]
             )
         )
 
@@ -102,7 +107,7 @@ def get_column_names(
     weight_col: str | None,
     no_header_row: bool = False,
 ) -> tuple[list[str], list[str]]:
-    df_cols = pd.read_csv(path, index_col=False, nrows=0).columns.tolist()
+    df_cols = read_table(path, index_col=False, nrows=0).columns.tolist()
 
     if no_header_row:
         return ["SMILES"], ["pred_" + str(i) for i in range((len(df_cols) - 1))]
@@ -118,7 +123,10 @@ def get_column_names(
             for column in df_cols
             if column
             not in set(
-                input_cols + (ignore_cols or []) + ([splits_col] or []) + ([weight_col] or [])
+                input_cols
+                + (ignore_cols or [])
+                + ([splits_col] or [])
+                + ([weight_col] or [])
             )
         )
 
@@ -144,7 +152,8 @@ def make_datapoints(
     use_cuikmolmaker_featurization: bool,
     n_workers: int = 0,
 ) -> tuple[
-    list[list[MoleculeDatapoint]] | list[list[LazyMoleculeDatapoint]], list[list[ReactionDatapoint]]
+    list[list[MoleculeDatapoint]] | list[list[LazyMoleculeDatapoint]],
+    list[list[ReactionDatapoint]],
 ]:
     """Make the :class:`MoleculeDatapoint`s and :class:`ReactionDatapoint`s for a given
     dataset.
@@ -247,7 +256,9 @@ def make_datapoints(
     if use_cuikmolmaker_featurization:
         mol_data = [
             LazyMoleculeDatapoint(
-                smiles=smiss[0][i],  # cuikmolmaker only supports single molecule datapoints
+                smiles=smiss[0][
+                    i
+                ],  # cuikmolmaker only supports single molecule datapoints
                 _keep_h=keep_h,
                 _add_h=add_h,
                 _ignore_stereo=ignore_stereo,
@@ -273,9 +284,14 @@ def make_datapoints(
         elif molecule_featurizers is None:
             pass
         else:
-            molecule_featurizers = [MoleculeFeaturizerRegistry[mf]() for mf in molecule_featurizers]
+            molecule_featurizers = [
+                MoleculeFeaturizerRegistry[mf]() for mf in molecule_featurizers
+            ]
             mol_descriptors = np.vstack(
-                [np.hstack([mf(dp.mol) for mf in molecule_featurizers]) for dp in mol_data]
+                [
+                    np.hstack([mf(dp.mol) for mf in molecule_featurizers])
+                    for dp in mol_data
+                ]
             )
             X_d = mol_descriptors if X_d is None else np.hstack([X_d, mol_descriptors])
         for dp, desc in zip(mol_data, X_d):
@@ -329,7 +345,9 @@ def make_datapoints(
     elif molecule_featurizers is None:
         pass
     else:
-        molecule_featurizers = [MoleculeFeaturizerRegistry[mf]() for mf in molecule_featurizers]
+        molecule_featurizers = [
+            MoleculeFeaturizerRegistry[mf]() for mf in molecule_featurizers
+        ]
 
         if len(smiss) > 0:
             mol_descriptors = np.hstack(
@@ -370,7 +388,10 @@ def make_datapoints(
                     np.vstack(
                         parallel_execute(
                             construct_row,
-                            [(rct, pdt, molecule_featurizers) for rct, pdt in zip(rcts, pdts)],
+                            [
+                                (rct, pdt, molecule_featurizers)
+                                for rct, pdt in zip(rcts, pdts)
+                            ],
                             n_workers=n_workers,
                         )
                     )
@@ -463,9 +484,15 @@ def build_data_from_files(
         else:
             X_ds = np.hstack([X_ds, X_d_extra])
 
-    V_fss = load_input_feats_and_descs(p_atom_feats, n_molecules, n_datapoints, feat_desc="V_f")
-    E_fss = load_input_feats_and_descs(p_bond_feats, n_molecules, n_datapoints, feat_desc="E_f")
-    V_dss = load_input_feats_and_descs(p_atom_descs, n_molecules, n_datapoints, feat_desc="V_d")
+    V_fss = load_input_feats_and_descs(
+        p_atom_feats, n_molecules, n_datapoints, feat_desc="V_f"
+    )
+    E_fss = load_input_feats_and_descs(
+        p_bond_feats, n_molecules, n_datapoints, feat_desc="E_f"
+    )
+    V_dss = load_input_feats_and_descs(
+        p_atom_descs, n_molecules, n_datapoints, feat_desc="V_d"
+    )
 
     mol_data, rxn_data = make_datapoints(
         smiss,
@@ -578,7 +605,9 @@ def make_dataset(
         return MoleculeDataset(data, featurizer, n_workers=n_workers)
 
     featurizer = CondensedGraphOfReactionFeaturizer(
-        mode_=reaction_mode, atom_featurizer=atom_featurizer, bond_featurizer=bond_featurizer
+        mode_=reaction_mode,
+        atom_featurizer=atom_featurizer,
+        bond_featurizer=bond_featurizer,
     )
 
     return ReactionDataset(data, featurizer, n_workers=n_workers)
