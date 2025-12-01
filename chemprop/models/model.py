@@ -289,7 +289,7 @@ class MPNN(pl.LightningModule):
 
     @classmethod
     def load_from_checkpoint(
-        cls, checkpoint_path, map_location=None, hparams_file=None, strict=True, **kwargs
+        cls, checkpoint_path, map_location=None, hparams_file=None, strict=True, weights_only=False, **kwargs
     ) -> MPNN:
         submodules = {
             k: v for k, v in kwargs.items() if k in ["message_passing", "agg", "predictor"]
@@ -305,7 +305,7 @@ class MPNN(pl.LightningModule):
         torch.save(d, buffer)
         buffer.seek(0)
 
-        return super().load_from_checkpoint(buffer, map_location, hparams_file, strict, **kwargs)
+        return super().load_from_checkpoint(buffer, map_location, hparams_file, strict, weights_only, **kwargs)
 
     @classmethod
     def load_from_file(cls, model_path, map_location=None, strict=True, **submodules) -> MPNN:
