@@ -40,6 +40,7 @@ from chemprop.cli.utils import (
     make_dataset,
     parse_activation,
     parse_indices,
+    read_table,
     TABLE_READ_FORMATS,
     write_table,
 )
@@ -1169,7 +1170,7 @@ def build_splits(args, format_kwargs, featurization_kwargs):
         )
 
     if args.splits_column is not None:
-        df = pd.read_csv(
+        df = read_table(
             args.data_path,
             header=None if args.no_header_row else "infer",
             index_col=False,
