@@ -2141,9 +2141,9 @@ def train_model(
                     devices=1,
                 )
                 model = model.load_from_checkpoint(best_ckpt_path)
-                predss = trainer.predict(model, dataloaders=test_loader)
+                predss = trainer.predict(model, dataloaders=test_loader, weights_only=False)
             else:
-                predss = trainer.predict(dataloaders=test_loader)
+                predss = trainer.predict(dataloaders=test_loader, weights_only=False)
 
             if isinstance(train_loader.dataset, MolAtomBondDataset):
                 mol_preds, atom_preds, bond_preds = (
