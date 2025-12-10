@@ -571,6 +571,20 @@ def add_train_args(parser: ArgumentParser) -> ArgumentParser:
         "'balanced': weight[c] = n_samples / (n_classes * n_samples_class[c]). "
         "Mutually exclusive with --class-weights-path and --pos-weight.",
     )
+    train_args.add_argument(
+        "--skip-test-evaluation",
+        action="store_true",
+        help="Whether to skip evaluation of test set and only save the predictions",
+    )
+    train_args.add_argument(
+        "--test-predictions-path",
+        type=Path,
+        default=Path("test_predictions.csv"),
+        help=(
+            "Path for saving test predictions. If relative, it is resolved under the"
+            " model output directory. The extension controls format (.csv/.parquet/etc.)."
+        ),
+    )
 
     split_args = parser.add_argument_group("split args")
     split_args.add_argument(
@@ -2178,9 +2192,14 @@ def train_model(
                     preds = preds[..., 0]
                 preds = preds.numpy()
 
-                evaluate_and_save_predictions(
-                    preds, test_loader, model.metrics[:-1], model_output_dir, args
-                )
+                if args.skip_test_evaluation:
+                    save_predictions(
+                        preds, test_loader, model.metrics[:-1], model_output_dir, args
+                    )
+                else:
+                    evaluate_and_save_predictions(
+                        preds, test_loader, model.metrics[:-1], model_output_dir, args
+                    )
 
         best_model_path = checkpointing.best_model_path
         model = model.__class__.load_from_checkpoint(best_model_path)
@@ -2199,6 +2218,40 @@ def train_model(
 
         if args.remove_checkpoints:
             temp_dir.cleanup()
+
+
+def _resolve_predictions_path(model_output_dir: Path, predictions_path: Path) -> Path:
+    """Resolve prediction output path and ensure parent directory exists."""
+    path = predictions_path if predictions_path.is_absolute() else model_output_dir / predictions_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def save_predictions(preds, test_loader, metrics, model_output_dir, args):
+    names = test_loader.dataset.names
+    if isinstance(test_loader.dataset, MulticomponentDataset):
+        namess = list(zip(*names))
+    else:
+        namess = [names]
+
+    columns = args.input_columns + args.target_columns
+    if "multiclass" in args.task_type:
+        columns = columns + [f"{col}_prob" for col in args.target_columns]
+        formatted_probability_strings = format_probability_string(preds)
+        predicted_class_labels = preds.argmax(axis=-1)
+        df_preds = pd.DataFrame(
+            list(
+                zip(
+                    *namess, *predicted_class_labels.T, *formatted_probability_strings.T
+                )
+            ),
+            columns=columns,
+        )
+    else:
+        df_preds = pd.DataFrame(list(zip(*namess, *preds.T)), columns=columns)
+
+    output_path = _resolve_predictions_path(model_output_dir, args.test_predictions_path)
+    write_table(df_preds, output_path, index=False)
 
 
 def evaluate_and_save_predictions(preds, test_loader, metrics, model_output_dir, args):
@@ -2278,7 +2331,8 @@ def evaluate_and_save_predictions(preds, test_loader, metrics, model_output_dir,
     else:
         df_preds = pd.DataFrame(list(zip(*namess, *preds.T)), columns=columns)
 
-    write_table(df_preds, model_output_dir / "test_predictions.csv", index=False)
+    output_path = _resolve_predictions_path(model_output_dir, args.test_predictions_path)
+    write_table(df_preds, output_path, index=False)
 
 
 def evaluate_and_save_MAB_predictions(
@@ -2461,7 +2515,8 @@ def evaluate_and_save_MAB_predictions(
         ]
         df_preds = pd.DataFrame(outputs, columns=columns)
 
-    write_table(df_preds, model_output_dir / "test_predictions.csv", index=False)
+    output_path = _resolve_predictions_path(model_output_dir, args.test_predictions_path)
+    write_table(df_preds, output_path, index=False)
 
 
 def main(args):
